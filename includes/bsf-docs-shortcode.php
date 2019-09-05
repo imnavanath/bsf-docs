@@ -138,7 +138,27 @@ function bsf_load_search_results() {
 
 	$query               = sanitize_text_field( $_GET['query'] );
 	$selected_post_types = get_option( 'bsf_search_post_types' );
+	$docs_post_type		 = get_option( 'bsf_search_post_types', 'docs' );
 	$selected_post_types = ! $selected_post_types ? array( 'post', 'page' ) : $selected_post_types;
+	$cat_array 			 = array();
+	$cat_slugs			 = array();
+	$post_search_data	 = array();
+	$taxonomies 		 = get_object_taxonomies( $docs_post_type );
+
+	foreach( $taxonomies as $taxonomy ) { // Gets every "category" (term) in this taxonomy to get the respective posts
+		$terms = get_terms( $taxonomy );
+		foreach( $terms as $term ) {
+			$cat_array[ $term->slug ] = $term->name;
+		}
+	}
+
+	if( ! empty( $cat_array ) ) {
+		foreach( $cat_array as $cat_slug => $cat_name ) {
+			if( ( strpos( $cat_slug, $query ) !== false ) || ( strpos( $cat_name, $query ) !== false ) ) {
+				$cat_slugs[ $cat_slug ] = $cat_slug;
+			}
+		}
+	}
 
 	$args = array(
 		'post_type'   => $selected_post_types,
@@ -146,7 +166,28 @@ function bsf_load_search_results() {
 		's'           => $query,
 	);
 
-	$search = new WP_Query( $args );
+	$post_search_query = new WP_Query( $args );
+
+	$tax_args = array(
+		'post_type' => $docs_post_type,
+		'tax_query' => array(
+			'relation' => 'OR',
+			array(
+				'taxonomy' => 'docs_category',
+				'field'    => 'slug',
+				'terms'    => $cat_slugs,
+			),
+			array(
+				'taxonomy' => 'docs_tag',
+				'field'    => 'slug',
+				'terms'    => $cat_slugs,
+			),
+		),
+	);
+
+	$tax_search_query = new WP_Query( $tax_args );
+
+	$flag = false;
 
 	ob_start();
 
@@ -156,24 +197,50 @@ function bsf_load_search_results() {
 
 	<?php
 
-	if ( $search->have_posts() ) :
+		if ( $post_search_query->have_posts() ) {
 
-		while ( $search->have_posts() ) :
-			$search->the_post();
-			?>
-				<li>
-					<a href="<?php the_permalink(); ?>"><?php the_title(); ?></a>
-				</li>
+			while ( $post_search_query->have_posts() ) {
+
+				$post_search_query->the_post();
+				$searched_post_id = get_the_ID();
+				$searched_post_title = get_the_title();
+
+				$post_search_data[ $searched_post_id ] = $searched_post_title;
+
+				?>
+					<li>
+						<a href="<?php the_permalink(); ?>"><?php echo $searched_post_title; ?></a>
+					</li>
+				<?php
+			}
+
+			$flag = true;
+		}
+
+		if ( $tax_search_query->have_posts() ) {
+
+			while ( $tax_search_query->have_posts() ) {
+
+				$tax_search_query->the_post();
+				$tax_search_id = get_the_ID();
+				$tax_search_title = get_the_title();
+
+				if( ! array_key_exists( $tax_search_id, $post_search_data ) ) {
+					?>
+						<li>
+							<a href="<?php the_permalink(); ?>"><?php echo $tax_search_title; ?></a>
+						</li>
+					<?php
+				}
+			}
+
+			$flag = true;
+		}
+
+		if( ! $flag ) { ?>
+			<li class="nothing-here"><?php _e( 'Sorry, no docs were found.', 'bsf-docs' ); ?></li>
 			<?php
-		endwhile;
-
-		?>
-
-	<?php else : ?>
-		<li class="nothing-here"><?php _e( 'Sorry, no docs were found.', 'bsf-docs' ); ?></li>
-		<?php
-	endif;
-
+		}
 	?>
 	</ul> 
 	<?php
@@ -184,6 +251,4 @@ function bsf_load_search_results() {
 
 	echo $content;
 	die();
-
 }
-
